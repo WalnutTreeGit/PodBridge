@@ -67,6 +67,7 @@ public partial class App : Application
         _trayIcon.SetAudioRecoveryHandler(ShowAudioRecoveryWindow);
 
         var monitor = _host.Services.GetRequiredService<IConnectionMonitor>();
+        _trayIcon.SetReconnectHandler(() => Reconnect(monitor));
 
         // Surface the read-only audio state (codec + mic-mode lines, "Refresh audio
         // status", and the confirmed-SBC guidance notification). Start it BEFORE the
@@ -285,6 +286,30 @@ public partial class App : Application
             EnableAdvancedTier);
         _gestureSettingsWindow.Closed += (_, _) => _gestureSettingsWindow = null;
         _gestureSettingsWindow.Show();
+    }
+
+    // Fires from the tray "Pair / Reconnect" entry. Attempts a live reconnect of the
+    // already-paired AirPods (WinRtConnectionMonitor.ReconnectAsync) instead of sending
+    // the user to Windows Bluetooth settings; a live ConnectionStatusChanged already
+    // updates the tray status line if it succeeds, so this only needs to handle the
+    // failure case with an honest, actionable notification. Fire-and-forget from a
+    // synchronous UI-thread handler; best-effort and never throws past this boundary.
+    private async void Reconnect(IConnectionMonitor monitor)
+    {
+        try
+        {
+            var connected = await monitor.ReconnectAsync();
+            if (!connected)
+            {
+                _trayIcon?.ShowNotification(
+                    "PodBridge",
+                    "Couldn't reconnect. Make sure your AirPods are nearby, charged, and already paired — otherwise use \"Open Bluetooth settings\".");
+            }
+        }
+        catch (Exception)
+        {
+            // A reconnect attempt is a best-effort UI action; it must never crash the tray.
+        }
     }
 
     // Opens the audio-collapse recovery guide (issue #173) from the tray notification

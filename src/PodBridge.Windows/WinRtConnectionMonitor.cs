@@ -104,6 +104,58 @@ public sealed class WinRtConnectionMonitor : IConnectionMonitor, IDisposable
         GC.SuppressFinalize(this);
     }
 
+    /// <inheritdoc />
+    /// <remarks>
+    /// Windows' WinRT surface has no direct "connect" call for a paired
+    /// Bluetooth-Classic device (docs/research/connection-detection.md covers only
+    /// status detection). The documented-in-practice way to force the OS to bring a
+    /// paired-but-idle link up — the same mechanism Settings' own "Connect" button
+    /// relies on — is to query the device's RFCOMM services with
+    /// <see cref="BluetoothCacheMode.Uncached"/>: an uncached query runs a live SDP
+    /// lookup over the air, which requires (and therefore triggers) the underlying
+    /// ACL connection. We discard the query result; only the side effect matters.
+    /// </remarks>
+    public async Task<bool> ReconnectAsync(CancellationToken cancellationToken = default)
+    {
+        List<BluetoothDevice> devices;
+        lock (_gate)
+        {
+            devices = [.. _devices.Values];
+        }
+
+        if (devices.Count == 0)
+        {
+            return false; // never paired / not yet enumerated — caller falls back to Settings.
+        }
+
+        var connected = false;
+        foreach (var device in devices)
+        {
+            if (device.ConnectionStatus == BluetoothConnectionStatus.Connected)
+            {
+                connected = true;
+                continue;
+            }
+
+            try
+            {
+                await device.GetRfcommServicesAsync(BluetoothCacheMode.Uncached)
+                    .AsTask(cancellationToken)
+                    .ConfigureAwait(false);
+            }
+            catch (Exception) when (!cancellationToken.IsCancellationRequested)
+            {
+                // A failed/timed-out SDP query is a normal "still out of range or off"
+                // outcome, not a crash — try the next tracked device.
+                continue;
+            }
+
+            connected |= device.ConnectionStatus == BluetoothConnectionStatus.Connected;
+        }
+
+        return connected;
+    }
+
     private void StartWatcher()
     {
         var selector = BluetoothDevice.GetDeviceSelectorFromPairingState(true);

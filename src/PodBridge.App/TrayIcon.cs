@@ -76,6 +76,7 @@ public sealed class TrayIcon : IDisposable
     private Action? _callModeToggleHandler;
     private Action<NoiseControlMode>? _noiseControlModeHandler;
     private Action? _enableAdvancedTierHandler;
+    private Action? _reconnectHandler;
     private Action? _gestureSettingsHandler;
     private Action? _exportDiagnosticsHandler;
     private Action<bool>? _debugLoggingHandler;
@@ -182,6 +183,14 @@ public sealed class TrayIcon : IDisposable
     /// issue #173). Call on the UI thread.
     /// </summary>
     public void SetAudioRecoveryHandler(Action handler) => _audioRecoveryHandler = handler;
+
+    /// <summary>
+    /// Wires the callback invoked by the "Pair / Reconnect" menu action. Fires
+    /// instead of opening Windows Bluetooth settings; the handler attempts a live
+    /// reconnect of the already-paired AirPods and should fall back to guiding the
+    /// user to Settings only if that attempt fails. Call on the UI thread.
+    /// </summary>
+    public void SetReconnectHandler(Action handler) => _reconnectHandler = handler;
 
     /// <summary>
     /// Wires the diagnostics/logging menu actions: <paramref name="onExport"/> fires for
@@ -358,9 +367,10 @@ public sealed class TrayIcon : IDisposable
         menu.Items.Add(_micPolicyMenu);
         menu.Items.Add(_noiseControlMenu);
         menu.Items.Add(CreateItem("Refresh audio status", OnRefreshAudio));
-        // Phase 1: "Pair / Reconnect" deep-links to Bluetooth settings like
-        // "Open Bluetooth settings"; issue #7 gives it live reconnect behaviour.
-        menu.Items.Add(CreateItem("Pair / Reconnect", OnOpenBluetoothSettings));
+        // "Pair / Reconnect" triggers a live reconnect of the already-paired AirPods
+        // (SetReconnectHandler); "Open Bluetooth settings" stays the manual fallback
+        // for a never-paired device or a failed reconnect attempt.
+        menu.Items.Add(CreateItem("Pair / Reconnect", OnReconnect));
         menu.Items.Add(CreateItem("Open Bluetooth settings", OnOpenBluetoothSettings));
         menu.Items.Add(new Separator());
         menu.Items.Add(CreateItem("Gesture controls…", OnGestureSettings));
@@ -484,6 +494,9 @@ public sealed class TrayIcon : IDisposable
 
     private static void OnOpenBluetoothSettings(object sender, RoutedEventArgs e)
         => OpenUri(BluetoothSettingsUri, "Could not open Windows Bluetooth settings.");
+
+    private void OnReconnect(object sender, RoutedEventArgs e)
+        => _reconnectHandler?.Invoke();
 
     private static void OnExit(object sender, RoutedEventArgs e)
         => Application.Current.Shutdown();
